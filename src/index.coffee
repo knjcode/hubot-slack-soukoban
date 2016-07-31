@@ -66,27 +66,15 @@ class SoukobanGame
 module.exports = (robot) ->
   games = {}
 
-  postMessage = (message, channelId) -> new Promise (resolve) ->
-    robot.adapter.client._apiCall 'chat.postMessage',
-      channel: channelId
-      text   : message
-      as_user: true
-    , (res) -> resolve res
+  postMessage = (message, channelId) ->
+    robot.adapter.client.web.chat.postMessage channelId, message, {as_user: true}
 
   updateMessage = (message, channelId, ts) -> new Promise (resolve, reject) ->
-    robot.adapter.client._apiCall 'chat.update',
-      channel: channelId
-      text   : message
-      ts     : ts
-    , (res) ->
+    robot.adapter.client.web.chat.update ts, channelId, message, {}, (err, res) ->
       if res.ok then resolve(res) else reject(new Error res.error)
 
-  addReaction = (name, channelId, ts) -> new Promise (resolve) ->
-    robot.adapter.client._apiCall 'reactions.add',
-      name     : name
-      timestamp: ts
-      channel  : channelId
-    , (res) -> resolve res
+  addReaction = (name, channelId, ts) ->
+    robot.adapter.client.web.reactions.add name, {timestamp: ts, channel: channelId}
 
   startGame = (game, channelId) ->
     postMessage(game.print(), channelId)
@@ -97,9 +85,9 @@ module.exports = (robot) ->
       , Promise.resolve())
 
 
-  robot.adapter.client.on 'raw_message', (message) ->
-    robotUserId = robot.adapter.client.getUserByName(robot.name).id
-    if (/^reaction_(added|removed)$/.test message.type) && (message.user isnt robotUserId)
+  robot.adapter.client.rtm.on 'raw_message', (message) ->
+    message = JSON.parse message
+    if (/^reaction_(added|removed)$/.test message.type) && (message.user isnt robot.adapter.self.id)
       emojiKey = _.findKey EMOJIS, (emoji) -> emoji is message.reaction
       ts = message.item.ts
       channelId = message.item.channel
@@ -117,11 +105,10 @@ module.exports = (robot) ->
             Promise.reject e
 
   robot.hear /soukoban[^\d]*(\d*)/, (msg) ->
-    unless robot.adapter?.client?._apiCall?
+    unless robot.adapter?.client?.web?
       msg.send 'This script runs only with hubot-slack.'
       return
 
     number = msg.match[1] or Math.floor(Math.random() * MAPS.length)
-    channelId = robot.adapter.client.getChannelGroupOrDMByName(msg.envelope.room)?.id
     game = new SoukobanGame(MAPS[number], number)
-    startGame(game, channelId)
+    startGame(game, msg.envelope.room)
